@@ -21,7 +21,7 @@ def eval_step(model, train_dataloader, obj_path):
         centroid = train_dataloader.dataset.centroid
 
         for metric_name, sample_fn in [('bounding F1', sample_points_bb), ('surface F1', sample_points_ns)]:
-            points, are_inside = sample_points_ns(obj_path, 10_000)
+            points, are_inside = sample_fn(obj_path, 10_000)
             points -= centroid
             points = (points - coord_min) / (coord_max - coord_min)
             points -= 0.5
@@ -46,6 +46,7 @@ def train_siren(model, train_dataloader, epochs, lr, loss_fn, obj_path, weights_
     for epoch in range(epochs):
         model.train()
 
+        train_losses = []
         for step, (model_input, gt) in enumerate(train_dataloader):
             model_input = {key: value.cuda() for key, value in model_input.items()}
             gt = {key: value.cuda() for key, value in gt.items()}
@@ -55,11 +56,11 @@ def train_siren(model, train_dataloader, epochs, lr, loss_fn, obj_path, weights_
             reduced_losses = {loss_name: torch.mean(loss) for loss_name, loss in losses.items()}
             train_loss = sum(torch.mean(loss) for loss in losses.values())
 
-            wandb.log(reduced_losses, commit=False)
-            wandb.log({'total_train_loss': train_loss, 'global_step': total_steps})
+            # wandb.log(reduced_losses, commit=False)
 
             optim.zero_grad()
             train_loss.backward()
+            train_losses.append(train_loss.item())
 
             if clip_grad:
                 if isinstance(clip_grad, bool):
@@ -70,15 +71,19 @@ def train_siren(model, train_dataloader, epochs, lr, loss_fn, obj_path, weights_
             optim.step()
 
             total_steps += 1
+        total_train_loss = np.mean(train_losses)
 
         if (epoch % 10) == 0:
-            print(f"Train loss = {train_loss:.2f}")
+            print(f"Train loss = {total_train_loss:.2f}")
             metrics = eval_step(model, train_dataloader, obj_path)
             for name, val in metrics.items():
                 print(f"{name} = {val:.2f}")
+
+            wandb.log({'total_train_loss': total_train_loss, 'global_step': total_steps}, commit=False)
             wandb.log({**metrics, 'epoch': epoch})
-            if train_loss < min_train_loss:
-                min_train_loss = train_loss
+
+            if total_train_loss < min_train_loss:
+                min_train_loss = total_train_loss
                 torch.save(
                     {
                         'centroid': dataloader.dataset.centroid,
@@ -87,7 +92,7 @@ def train_siren(model, train_dataloader, epochs, lr, loss_fn, obj_path, weights_
                         'weights': model.state_dict()
                     },
                     weights_path)
-            scheduler.step(train_loss)
+            scheduler.step(total_train_loss)
 
 
 if __name__ == "__main__":
@@ -107,5 +112,5 @@ if __name__ == "__main__":
     model = Siren(3, 256, 3, 1)
     model.cuda()
 
-    train_siren(model, dataloader, epochs=args.epoch, lr=1e-4, loss_fn=sdf, obj_path=args.obj_path, weights_path=args.weights_path, clip_grad=False)
+    train_siren(model, dataloader, epochs=args.epochs, lr=1e-4, loss_fn=sdf, obj_path=args.obj_path, weights_path=args.weights_path, clip_grad=False)
     wandb.finish()
