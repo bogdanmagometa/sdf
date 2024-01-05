@@ -1,5 +1,4 @@
-import bpy
-import mathutils
+import trimesh
 import numpy as np
 import torch
 import pymeshlab as ml
@@ -24,14 +23,18 @@ def is_inside(point, obj):
             n_intersections += 1
     return n_intersections % 2 == 1
 
+# def check_inside(obj_path, points):
+#     with temp_stdout_removal():
+#         imported_object = bpy.ops.wm.obj_import(filepath=obj_path, forward_axis='Y', up_axis='Z')
+#     obj_object = bpy.context.selected_objects[0]
+#     inside = []
+#     for point in points:
+#         inside.append(is_inside(mathutils.Vector(point), obj_object))
+#     return np.array(inside)
+
 def check_inside(obj_path, points):
-    with temp_stdout_removal():
-        imported_object = bpy.ops.wm.obj_import(filepath=obj_path, forward_axis='Y', up_axis='Z')
-    obj_object = bpy.context.selected_objects[0]
-    inside = []
-    for point in points:
-        inside.append(is_inside(mathutils.Vector(point), obj_object))
-    return np.array(inside)
+    mesh = trimesh.load_mesh(obj_path)
+    return mesh.contains(points)
 
 def sample_points_bb(obj_path, num_points=10_000):
     vertices, faces = read_obj(obj_path)
